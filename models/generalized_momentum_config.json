@@ -1,0 +1,72 @@
+{
+  "n_samples": 72395,
+  "n_features": 20,
+  "feature_names": [
+    "vol_imbalance",
+    "candle_size_pct",
+    "volume_surge",
+    "tick_momentum",
+    "vwap_dist",
+    "body_wick_ratio",
+    "vol_percentile",
+    "consecutive_bars",
+    "price_structure",
+    "acceleration",
+    "is_first_hour",
+    "is_lunch",
+    "is_last_hour",
+    "range_position",
+    "gap_size",
+    "mfi",
+    "relative_volatility",
+    "momentum_rank",
+    "volume_rank",
+    "price_percentile"
+  ],
+  "class_distribution": {
+    "1": 37188,
+    "-1": 35207
+  },
+  "wfv_mean": 0.5182760049730625,
+  "wfv_std": 0.0037092957772574186,
+  "test_accuracy": 0.5188203605221355,
+  "test_precision": 0.5180460597845635,
+  "test_recall": 0.5188203605221355,
+  "test_f1": 0.518348837195112,
+  "top_features": {
+    "feature": [
+      "vwap_dist",
+      "vol_imbalance",
+      "relative_volatility",
+      "price_percentile",
+      "momentum_rank",
+      "vol_percentile",
+      "mfi",
+      "acceleration",
+      "volume_surge",
+      "tick_momentum",
+      "range_position",
+      "volume_rank",
+      "price_structure",
+      "gap_size",
+      "candle_size_pct"
+    ],
+    "importance": [
+      2438,
+      1378,
+      1339,
+      1086,
+      983,
+      964,
+      882,
+      720,
+      533,
+      506,
+      496,
+      466,
+      461,
+      398,
+      359
+    ]
+  }
+}
