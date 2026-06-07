@@ -78,33 +78,42 @@ class StockPredictor:
         
         return results
     
-    def predict_latest(self, df):
+    def predict_latest(self, df, min_confidence=0.65):
         """
-        Get prediction for the latest bar only
-        
+        Get prediction for the latest bar only.
+        Applies min_confidence threshold: below it, signal is HOLD.
+
         Args:
             df: DataFrame with latest data
-        
+            min_confidence: Minimum confidence to emit BUY/SELL (default 0.65)
+
         Returns:
             Dict with latest signal
         """
         results = self.predict_stock(df)
-        
+
         if results is None:
             return None
-        
+
         latest_idx = -1
-        
+        confidence = results['confidence'][latest_idx]
+        raw_prediction = results['predictions'][latest_idx]
+
+        # Only emit directional signal if model is confident enough
+        effective_prediction = raw_prediction if confidence >= min_confidence else 0
+
         latest_result = {
             'timestamp': results['timestamps'][latest_idx],
             'price': results['prices'][latest_idx],
-            'prediction': results['predictions'][latest_idx],
-            'signal': self._prediction_to_signal(results['predictions'][latest_idx]),
+            'prediction': effective_prediction,
+            'raw_prediction': raw_prediction,
+            'signal': self._prediction_to_signal(effective_prediction),
             'probability': results['probabilities'][latest_idx],
-            'confidence': results['confidence'][latest_idx],
-            'expected_return': results['expected_returns'][latest_idx]
+            'confidence': confidence,
+            'expected_return': results['expected_returns'][latest_idx],
+            'strength': 'STRONG' if confidence > 0.70 else ('MODERATE' if confidence >= 0.55 else 'WEAK'),
         }
-        
+
         return latest_result
     
     def _prediction_to_signal(self, prediction):
