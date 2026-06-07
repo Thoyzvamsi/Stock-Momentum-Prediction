@@ -1,0 +1,21 @@
+# Core data
+pandas==3.0.2
+numpy==2.4.4
+
+# ML
+scikit-learn==1.8.0
+lightgbm==4.6.0
+
+# Market data
+yfinance==1.4.1
+
+# Dashboard
+streamlit==1.58.0
+plotly==6.8.0
+
+# AI news sentiment
+groq==1.4.0
+
+# HTTP + env
+httpx==0.28.1
+python-dotenv==1.2.2
