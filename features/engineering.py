@@ -274,7 +274,7 @@ class GeneralizedFeatureEngineer:
 
         if initial_nan > 0:
             # Forward-fill then backward-fill to handle boundary NaNs from rolling
-            self.features = self.features.fillna(method='ffill').fillna(method='bfill')
+            self.features = self.features.ffill().bfill()
             remaining_nan = self.features.isna().sum().sum()
             if remaining_nan > 0:
                 # Last resort: fill with column median
