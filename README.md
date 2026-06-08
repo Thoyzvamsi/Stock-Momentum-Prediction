@@ -246,7 +246,7 @@ The Streamlit dashboard has four sections:
 ## Deployment
 
 Deployed on Streamlit Community Cloud:  
-**[stock-momentum-prediction.streamlit.app](https://stock-momentum-prediction.streamlit.app)**
+**[stock-momentum-prediction.streamlit.app](https://stock-momentum-prediction-psd5apu4lbgtwyxwo2obrk.streamlit.app/)**
 
 The `models/` directory (trained artifacts) must be committed to the repo for Streamlit Cloud to load the predictor. Model files are ~5MB and tracked in Git.
 
