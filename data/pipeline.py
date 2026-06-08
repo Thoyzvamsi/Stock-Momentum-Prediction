@@ -99,6 +99,32 @@ class MultiStockDataPipeline:
         except Exception as e:
             print(f"✗ Error fetching {ticker}: {str(e)}")
             return None
+        
+    def filter_market_hours(self ,df, ticker):
+        """
+        Keep only rows within trading hours, weekdays only.
+        yfinance returns NSE (.NS/.BO) data already in IST (Asia/Kolkata).
+        NSE session: 09:15 – 15:30 IST.
+        NYSE/NASDAQ: 09:30 – 16:00 ET.
+        """
+        is_nse = ticker.endswith('.NS') or ticker.endswith('.BO')
+        idx = df.index
+
+        # Ensure tz-aware index
+        if idx.tz is None:
+            idx = idx.tz_localize('UTC')
+
+        if is_nse:
+            local = idx.tz_convert('Asia/Kolkata')
+            start_min, end_min = 9 * 60 + 15, 15 * 60 + 30
+        else:
+            local = idx.tz_convert('America/New_York')
+            start_min, end_min = 9 * 60 + 30, 16 * 60
+
+        minutes = local.hour * 60 + local.minute
+        mask = (minutes >= start_min) & (minutes <= end_min) & (local.dayofweek < 5)
+        filtered = df[mask]
+        return filtered if len(filtered) > 10 else df
     
     # ========================================================================
     # Utilities
