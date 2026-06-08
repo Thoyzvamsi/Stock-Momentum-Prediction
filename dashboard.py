@@ -261,7 +261,7 @@ with fa_left:
     if pe:
         st.markdown(f"**Trailing P/E:** {pe:.1f}")
     if div_yield:
-        st.markdown(f"**Dividend Yield:** {div_yield*100:.2f}%")
+        st.markdown(f"**Dividend Yield:** {div_yield:.2f}%")
     if beta:
         st.markdown(f"**Beta:** {beta:.2f}")
 
