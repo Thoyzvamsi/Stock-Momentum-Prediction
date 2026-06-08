@@ -1,6 +1,31 @@
-.env
-
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
 
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Data (raw CSVs can be large — keep processed only)
+data/raw_data.csv
+
+# Jupyter
 .ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Streamlit local cache
+.streamlit/secrets.toml
