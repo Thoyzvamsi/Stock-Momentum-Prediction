@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import warnings
+from engine.indicators import Indicators
 warnings.filterwarnings('ignore')
 
 class GeneralizedFeatureEngineer:
@@ -49,11 +50,15 @@ class GeneralizedFeatureEngineer:
         self._stock_momentum_rank()
         self._volume_rank()
         self._price_percentile()
-        
+
+        df_ind = Indicators.add_all(self.df)
+        self.features['atr'] = df_ind['atr'].values
+        self.features['adx'] = df_ind['adx'].values
+            
         self._validate()
         print(f"✓ Created {self.features.shape[1]} features")
         return self.features
-    
+
     # ========================================================================
     # STOCK-SPECIFIC FEATURES (TIER 1)
     # ========================================================================
@@ -305,9 +310,8 @@ class GeneralizedFeatureEngineer:
 
 class GeneralizedTargetEngineer:
     """Create targets for multi-stock model"""
-    
     @staticmethod
-    def create_forward_return_target(df, forward_bars=8, threshold=0.005):
+    def create_forward_return_target(df, forward_bars=6, threshold=0.005):
         """
         Create 3-class target for generalized model.
         Accounts for different price scales across stocks by using % returns.

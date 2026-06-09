@@ -78,7 +78,7 @@ class StockPredictor:
         
         return results
     
-    def predict_latest(self, df, min_confidence=0.65):
+    def predict_latest(self, df, min_confidence=0.52):
         """
         Get prediction for the latest bar only.
         Applies min_confidence threshold: below it, signal is HOLD.
@@ -111,7 +111,7 @@ class StockPredictor:
             'probability': results['probabilities'][latest_idx],
             'confidence': confidence,
             'expected_return': results['expected_returns'][latest_idx],
-            'strength': 'STRONG' if confidence > 0.70 else ('MODERATE' if confidence >= 0.55 else 'WEAK'),
+            'strength': 'STRONG' if confidence > 0.55 else ('MODERATE' if confidence >= 0.52 else 'WEAK'),
         }
 
         return latest_result

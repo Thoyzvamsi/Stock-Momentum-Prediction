@@ -13,7 +13,7 @@ from training.model_training import GeneralizedMLTrainer, DataSplitter
 from engine.backtest import CostAwareBacktester
 
 
-def main(forward_bars=8, threshold=0.005, test_size=0.2,
+def main(forward_bars=6, threshold=0.005, test_size=0.2,
          commission=0.001, slippage=0.002, position_size=10,
          min_confidence=0.65, hold_bars=15):
     """
@@ -153,9 +153,7 @@ def main(forward_bars=8, threshold=0.005, test_size=0.2,
         scaler=trainer.scaler,
         commission=commission,
         slippage=slippage,
-        position_size=position_size,
         min_confidence=min_confidence,
-        hold_bars=hold_bars
     )
 
     bt_metrics = backtester.run()

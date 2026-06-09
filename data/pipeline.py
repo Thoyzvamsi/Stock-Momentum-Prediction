@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 
 class MultiStockDataPipeline:
     """
-    Multi-stock data pipeline:
-    - Prediction: Fetch live data for any stock
+    Multi-stock data pipeline: 
+    Prediction: Fetch live data for any stock
     """
     
     def __init__(self, data_dir='data', models_dir='models'):
