@@ -80,36 +80,78 @@ def fetch_data(ticker: str, period: str):
         return None
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=7200)
 def fetch_fundamentals(ticker: str) -> dict:
+    """
+    Multi-layer fundamentals fetch.
+    Layer 1: yf.Ticker.info (full, but rate-limited on cloud IPs)
+    Layer 2: fast_info + financials stitched together
+    Layer 3: fast_info only (price/mcap at minimum)
+    """
+    t = yf.Ticker(ticker)
+
+    # Layer 1 — try .info with retries
     for attempt in range(3):
         try:
-            return yf.Ticker(ticker).info
-        except Exception as e:
-            if "RateLimit" in str(e) or "rate" in str(e).lower():
-                if attempt < 2:
-                    time.sleep(2 ** attempt)
-                    continue
-            return {}
-    return {}
+            info = t.info
+            # yfinance sometimes returns a nearly-empty dict with just a message key
+            if info and len(info) > 5 and info.get('regularMarketPrice') is not None:
+                return info
+        except Exception:
+            pass
+        time.sleep(1.5 * (attempt + 1))
+
+    # Layer 2 — stitch from fast_info + financials + balance_sheet
+    result = {}
+    try:
+        fi = t.fast_info
+        result['regularMarketPrice'] = getattr(fi, 'last_price', None)
+        result['marketCap']          = getattr(fi, 'market_cap', None)
+        result['sector']             = 'N/A'
+        result['industry']           = 'N/A'
+
+        # trailing P/E from fast_info
+        pe = getattr(fi, 'pe_forward', None) or getattr(fi, 'pe_trailing', None)
+        if pe:
+            result['trailingPE'] = pe
+
+        # financials — ROE, revenue growth
+        try:
+            fin = t.financials
+            bs  = t.balance_sheet
+            if fin is not None and not fin.empty:
+                rev_rows = [r for r in fin.index if 'Total Revenue' in str(r)]
+                if rev_rows and fin.shape[1] >= 2:
+                    rev = fin.loc[rev_rows[0]]
+                    if rev.iloc[0] and rev.iloc[1] and rev.iloc[1] != 0:
+                        result['revenueGrowth'] = (rev.iloc[0] - rev.iloc[1]) / abs(rev.iloc[1])
+            if bs is not None and not bs.empty:
+                eq_rows = [r for r in bs.index if 'Stockholders' in str(r) or 'Equity' in str(r)]
+                ni_rows = [r for r in fin.index if 'Net Income' in str(r)] if fin is not None else []
+                if eq_rows and ni_rows:
+                    equity = bs.loc[eq_rows[0]].iloc[0]
+                    net_inc = t.financials.loc[ni_rows[0]].iloc[0]
+                    if equity and equity != 0:
+                        result['returnOnEquity'] = net_inc / equity
+        except Exception:
+            pass
+
+    except Exception:
+        pass
+
+    return result
 
 
 @st.cache_data(ttl=1800)
 def fetch_company_name(ticker_sym: str) -> str:
+    # fast_info only — no .info call to avoid extra rate-limit hit
     try:
         name = getattr(yf.Ticker(ticker_sym).fast_info, 'long_name', None)
         if name:
             return name
     except Exception:
         pass
-    try:
-        info = yf.Ticker(ticker_sym).info
-        name = info.get('longName') or info.get('shortName')
-        if name:
-            return name
-    except Exception:
-        pass
-    return ticker_sym.split('.')[0]
+    return ticker_sym.split('.')[0].replace('-', ' ').title()
 
 
 @st.cache_data(ttl=3600)
@@ -449,6 +491,10 @@ st.markdown(
 
 with st.spinner("Fetching fundamentals…"):
     info = fetch_fundamentals(ticker)
+
+# Show warning if data is sparse (cloud rate-limit fallback)
+if not info or len([v for v in info.values() if v is not None]) < 3:
+    st.warning("⚠️ Yahoo Finance returned limited data (cloud IP rate-limit). Showing available data only.")
 
 fund = Fundamentals()
 try:
