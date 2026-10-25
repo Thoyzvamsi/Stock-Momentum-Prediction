@@ -7,23 +7,31 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 import yfinance as yf
-import json
 import re
 import time
-import httpx
 from datetime import datetime
 from urllib.parse import quote
 from dotenv import load_dotenv
 import os
 
-from data.pipeline import MultiStockDataPipeline
-from fundamentals.scoring import Fundamentals
-from predictor.stock_predictor import StockPredictor
-from engine.indicators import Indicators
+from training.config import REPOSITORY_ROOT
+from training.data.pipeline import MultiStockDataPipeline
+from training.fundamentals.scoring import Fundamentals
+from training.predictor.stock_predictor import StockPredictor
+from training.engine.indicators import Indicators
+from news_utils import NewsFetchTimeoutError, fetch_news_rss
+from groq_sentiment import (
+    GroqCooldownError,
+    GroqInvalidResponseError,
+    GroqRequestLimiter,
+    groq_error_message,
+    parse_groq_sentiment_response,
+    rate_limit_retry_after,
+    select_available_model,
+)
+from ticker_utils import normalize_ticker_symbol
 
 # ============================================================================
 # Helper — safe single-box HTML (no layout CSS, no flex, no grid)
@@ -50,13 +58,20 @@ def divider_line() -> str:
 # ============================================================================
 # Secrets
 # ============================================================================
-load_dotenv()
+load_dotenv(REPOSITORY_ROOT / ".env")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = os.getenv("GROQ_MODEL")
 if not GROQ_API_KEY:
     try:
         GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-    except Exception:
+    except (FileNotFoundError, KeyError):
         pass
+if not GROQ_MODEL:
+    try:
+        GROQ_MODEL = st.secrets["GROQ_MODEL"]
+    except (FileNotFoundError, KeyError):
+        GROQ_MODEL = None
+GROQ_MODEL = (GROQ_MODEL or "").strip() or "llama-3.3-70b-versatile"
 if not GROQ_API_KEY:
     st.warning("⚠️ GROQ_API_KEY not set — news sentiment disabled.")
 
@@ -154,31 +169,57 @@ def fetch_company_name(ticker_sym: str) -> str:
     return ticker_sym.split('.')[0].replace('-', ' ').title()
 
 
-@st.cache_data(ttl=3600)
-def fetch_and_analyze_news(ticker_sym: str):
+@st.cache_resource
+def get_groq_model_limiter() -> GroqRequestLimiter:
+    return GroqRequestLimiter(min_interval_seconds=60)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def fetch_groq_model_ids() -> list[str]:
     if not GROQ_API_KEY:
-        return None, []
+        raise ValueError("GROQ_API_KEY is not configured.")
+    from groq import Groq
 
+    limiter = get_groq_model_limiter()
+    limiter.acquire()
+    try:
+        models = Groq(api_key=GROQ_API_KEY, max_retries=0).models.list().data
+    except Exception as error:
+        if getattr(error, "status_code", None) == 429:
+            retry_after = limiter.defer_after_rate_limit(
+                rate_limit_retry_after(error)
+            )
+            raise GroqCooldownError(retry_after) from error
+        raise
+    return [model.id for model in models]
+
+
+@st.cache_data(ttl=1800)
+def fetch_news_headlines(ticker_sym: str) -> tuple[str, list[str]]:
     company_name = fetch_company_name(ticker_sym)
-
     rss_url = (
         f"https://news.google.com/rss/search?"
         f"q={quote(company_name + ' stock NSE')}&hl=en-IN&gl=IN&ceid=IN:en"
     )
-    headlines = []
-    try:
-        resp = httpx.get(rss_url, timeout=10, follow_redirects=True)
-        resp.raise_for_status()
-        titles = re.findall(r'<title><!\[CDATA\[(.*?)\]\]></title>', resp.text)
-        if not titles:
-            titles = re.findall(r'<title>(.*?)</title>', resp.text)[1:]
-        headlines = [h.strip() for h in titles[:15] if h.strip()]
-    except Exception as e:
-        return {"error": f"News fetch failed: {e}"}, []
+    rss_content = fetch_news_rss(rss_url)
+    titles = re.findall(r'<title><!\[CDATA\[(.*?)\]\]></title>', rss_content)
+    if not titles:
+        titles = re.findall(r'<title>(.*?)</title>', rss_content)[1:]
+    headlines = [headline.strip() for headline in titles[:15] if headline.strip()]
+    return company_name, headlines
 
-    if not headlines:
-        return None, []
 
+@st.cache_resource
+def get_groq_request_limiter() -> GroqRequestLimiter:
+    return GroqRequestLimiter()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def analyze_headlines_with_groq(
+    ticker_sym: str, company_name: str, headlines: tuple[str, ...], model: str
+) -> dict:
+    if not GROQ_API_KEY:
+        raise ValueError("GROQ_API_KEY is not configured.")
     headlines_text = "\n".join(f"- {h}" for h in headlines)
     prompt = f"""You are a financial analyst. Analyze these news headlines for {company_name} ({ticker_sym}).
 
@@ -190,38 +231,99 @@ Respond ONLY with a valid JSON object. No markdown, no explanation, no extra tex
 
 Rules: overall_sentiment must be BULLISH/BEARISH/NEUTRAL/MIXED, sentiment_score integer -100 to +100, confidence HIGH/MEDIUM/LOW, no trailing commas."""
 
+    limiter = get_groq_request_limiter()
+    limiter.acquire()
     try:
         from groq import Groq
-        client = Groq(api_key=GROQ_API_KEY)
+
+        client = Groq(api_key=GROQ_API_KEY, max_retries=0)
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1024,
+            response_format={"type": "json_object"},
+            max_tokens=1536,
             temperature=0.1,
         )
-        raw = response.choices[0].message.content.strip()
-        raw = re.sub(r'```json|```', '', raw).strip()
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if not match:
-            return {"error": "Model returned no JSON"}, headlines
-        raw = match.group(0)
-        raw = re.sub(r',\s*}', '}', raw)
-        raw = re.sub(r',\s*]', ']', raw)
-        return json.loads(raw), headlines
-    except json.JSONDecodeError as e:
-        return {"error": f"JSON parse error: {e}"}, headlines
-    except Exception as e:
-        return {"error": str(e)}, headlines
+    except Exception as error:
+        if getattr(error, "status_code", None) == 429:
+            retry_after = limiter.defer_after_rate_limit(
+                rate_limit_retry_after(error)
+            )
+            raise GroqCooldownError(retry_after) from error
+        raise
+
+    if not response.choices:
+        raise GroqInvalidResponseError("The API returned no completion choices.")
+    choice = response.choices[0]
+    result = parse_groq_sentiment_response(
+        choice.message.content, choice.finish_reason
+    )
+    print(f"Using Groq model: {model}")
+    return result
+
+
+def fetch_and_analyze_news(ticker_sym: str):
+    if not GROQ_API_KEY:
+        return None, []
+
+    try:
+        company_name, headlines = fetch_news_headlines(ticker_sym)
+    except NewsFetchTimeoutError as error:
+        return {
+            "error": (
+                f"Google News timed out after {error.attempts} attempts. "
+                "Check your internet connection and try again."
+            )
+        }, []
+    except Exception as error:
+        return {
+            "error": f"News fetch failed ({type(error).__name__}). Try again later."
+        }, []
+
+    if not headlines:
+        return None, []
+
+    try:
+        available_models = fetch_groq_model_ids()
+        model = select_available_model(available_models, GROQ_MODEL)
+        if model is None:
+            return {
+                "error": "No supported Groq model is available. Set GROQ_MODEL to an available model."
+            }, headlines
+
+        sentiment = analyze_headlines_with_groq(
+            ticker_sym, company_name, tuple(headlines), model
+        )
+        return sentiment, headlines
+    except GroqCooldownError as error:
+        return {
+            "error": f"Groq is cooling down. Try again in {error.retry_after_seconds} seconds."
+        }, headlines
+    except Exception as error:
+        return {"error": groq_error_message(error)}, headlines
 
 
 # ============================================================================
 # Sidebar
 # ============================================================================
 st.sidebar.title("🎯 Control Panel")
-ticker = st.sidebar.text_input(
-    "Stock Symbol", value="TCS.NS",
-    placeholder="TCS.NS, RELIANCE.NS, INFY.NS"
-).upper().strip()
+def normalize_stock_symbol_input():
+    st.session_state["stock_symbol"] = normalize_ticker_symbol(
+        st.session_state["stock_symbol"]
+    )
+
+
+if "stock_symbol" not in st.session_state:
+    st.session_state["stock_symbol"] = "TCS.NS"
+
+st.sidebar.text_input(
+    "Stock Symbol",
+    key="stock_symbol",
+    placeholder="HDFCBANK, RELIANCE, TCS.NS",
+    on_change=normalize_stock_symbol_input,
+    help="Bare symbols default to NSE (.NS). Keep an exchange suffix for other markets.",
+)
+ticker = normalize_ticker_symbol(st.session_state["stock_symbol"])
 period = st.sidebar.selectbox("Data Period", ["30d", "45d", "60d"], index=2)
 st.sidebar.divider()
 st.sidebar.caption("Model: generalized_momentum")
@@ -236,7 +338,7 @@ if not ticker:
 try:
     predictor = load_predictor()
 except Exception as e:
-    st.error(f"Model not loaded: {e}. Run `python multi_stock_main.py` first.")
+    st.error(f"Model not loaded: {e}. Run `python -m training.run_train` first.")
     st.stop()
 
 # ============================================================================

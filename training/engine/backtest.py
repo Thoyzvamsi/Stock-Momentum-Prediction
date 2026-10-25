@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-from datetime import datetime
 
 
 class CostAwareBacktester:
@@ -66,7 +65,7 @@ class CostAwareBacktester:
         self.equity_curve = []
 
         # Compute ATR and ADX from raw OHLCV df — never from scaled features
-        from engine.indicators import Indicators
+        from training.engine.indicators import Indicators
         df_ind    = Indicators.add_all(self.df)
         self._atr = df_ind['atr'].values
         self._adx = df_ind['adx'].values
@@ -96,8 +95,13 @@ class CostAwareBacktester:
               f"|  Trail: {self.atr_trail_mult}x ATR  |  ADX >= {self.adx_threshold}  "
               f"|  ATR/ADX sourced from features")
 
-        predictions    = self.model.predict(self.features)
-        probabilities  = self.model.predict_proba(self.features)
+        features_scaled = pd.DataFrame(
+            self.scaler.transform(self.features),
+            columns=self.features.columns,
+            index=self.features.index,
+        )
+        predictions    = self.model.predict(features_scaled)
+        probabilities  = self.model.predict_proba(features_scaled)
         pred_confidence = probabilities.max(axis=1)
 
         equity           = self.capital
@@ -237,10 +241,10 @@ class CostAwareBacktester:
             self.trades.append(trade)
 
         if not self.trades:
-            print("✗ No trades fired — try lowering min_confidence or adx_threshold")
+            print("No trades fired - try lowering min_confidence or adx_threshold")
             return None
 
-        print(f"✓ Backtest complete: {len(self.trades)} trades executed")
+        print(f"Backtest complete: {len(self.trades)} trades executed")
         return self._calculate_metrics()
 
     # ------------------------------------------------------------------
@@ -327,7 +331,7 @@ class CostAwareBacktester:
 
     def print_results(self, metrics):
         if metrics is None:
-            print("✗ Backtest failed — no valid trades")
+            print("Backtest failed - no valid trades")
             return
 
         print("\n" + "="*55)
@@ -373,9 +377,9 @@ class CostAwareBacktester:
 
         print()
         if metrics['expected_value'] > 0:
-            print("✓ Strategy is PROFITABLE after transaction costs")
+            print("Strategy is PROFITABLE after transaction costs")
         else:
-            print("✗ Strategy is NOT PROFITABLE after transaction costs")
+            print("Strategy is NOT PROFITABLE after transaction costs")
         print("="*55)
 
 
@@ -384,12 +388,23 @@ class CostAwareBacktester:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    from data.pipeline import MultiStockDataPipeline
-    from features.engineering import GeneralizedFeatureEngineer, GeneralizedTargetEngineer
+    from training.config import (
+        COMMISSION_RATE,
+        FORWARD_BARS,
+        MIN_CONFIDENCE,
+        RAW_DATA_FILE,
+        SLIPPAGE_RATE,
+    )
+    from training.data.pipeline import MultiStockDataPipeline
+    from training.features.engineering import GeneralizedFeatureEngineer, GeneralizedTargetEngineer
     from training.model_training import GeneralizedMLTrainer, DataSplitter
 
     pipeline = MultiStockDataPipeline()
-    df = pd.read_csv("data/raw_data.csv")
+    df = pd.read_csv(RAW_DATA_FILE)
+    if 'Datetime' not in df.columns:
+        raise ValueError("Training data must include a Datetime column.")
+    df['Datetime'] = pd.to_datetime(df['Datetime'])
+    df = df.sort_values(['Datetime', 'Ticker'], kind='stable').reset_index(drop=True)
 
     if not pipeline.validate_training_data(df):
         raise SystemExit(1)
@@ -399,11 +414,16 @@ if __name__ == "__main__":
     features_clean = features.dropna()
     df_clean       = df.loc[features_clean.index]
 
-    target = GeneralizedTargetEngineer.create_forward_return_target(df_clean, forward_bars=8)
+    target = GeneralizedTargetEngineer.create_forward_return_target(
+        df_clean, forward_bars=FORWARD_BARS
+    )
 
     trainer = GeneralizedMLTrainer()
     X, y = trainer.prepare_data(features_clean, target)
-    X_train, X_test, y_train, y_test = DataSplitter.train_test_split_timeseries(X, y)
+    timestamps = df_clean.loc[X.index, 'Datetime']
+    X_train, X_test, y_train, y_test = DataSplitter.train_test_split_timeseries(
+        X, y, timestamps=timestamps, gap=FORWARD_BARS
+    )
     trainer.train_final_model(X_train, y_train)
     trainer.evaluate(X_test, y_test)
 
@@ -414,11 +434,11 @@ if __name__ == "__main__":
         features_df=X_test,
         model=trainer.model,
         scaler=trainer.scaler,
-        commission=0.001,
-        slippage=0.002,
+        commission=COMMISSION_RATE,
+        slippage=SLIPPAGE_RATE,
         capital=100_000,
         risk_pct=0.01,
-        min_confidence=0.65,
+        min_confidence=MIN_CONFIDENCE,
         atr_stop_mult=1.5,
         atr_tp_mult=3.0,
         atr_trail_mult=1.0,

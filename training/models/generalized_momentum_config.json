@@ -1,5 +1,5 @@
 {
-  "n_samples": 72395,
+  "n_samples": 72294,
   "n_features": 22,
   "feature_names": [
     "vol_imbalance",
@@ -26,15 +26,15 @@
     "adx"
   ],
   "class_distribution": {
-    "1": 37188,
-    "-1": 35207
+    "1.0": 37116,
+    "-1.0": 35178
   },
-  "wfv_mean": 0.5150435142975549,
-  "wfv_std": 0.0061475403918822905,
-  "test_accuracy": 0.5223427032253609,
-  "test_precision": 0.5182960936380993,
-  "test_recall": 0.5223427032253609,
-  "test_f1": 0.5176563354835972,
+  "wfv_mean": 0.5122725613044524,
+  "wfv_std": 0.01691368318004441,
+  "test_accuracy": 0.5284911717495987,
+  "test_precision": 0.528136384131868,
+  "test_recall": 0.5284911717495987,
+  "test_f1": 0.5282856527186012,
   "top_features": {
     "feature": [
       "vwap_dist",
@@ -50,25 +50,25 @@
       "tick_momentum",
       "price_structure",
       "volume_surge",
-      "volume_rank",
-      "range_position"
+      "gap_size",
+      "candle_size_pct"
     ],
     "importance": [
-      2089,
-      1582,
-      1260,
-      1176,
-      1080,
-      984,
-      830,
-      774,
-      681,
-      563,
-      422,
-      383,
-      335,
-      288,
-      281
+      2231,
+      1584,
+      1296,
+      994,
+      918,
+      846,
+      836,
+      737,
+      676,
+      616,
+      464,
+      354,
+      318,
+      307,
+      247
     ]
   }
 }

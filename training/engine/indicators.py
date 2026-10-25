@@ -1,6 +1,5 @@
 
 import pandas as pd
-import numpy as np
  
  
 class Indicators:
@@ -11,6 +10,20 @@ class Indicators:
  
     Expected columns (case-insensitive): Open, High, Low, Close, Volume
     """
+
+    @staticmethod
+    def _apply_by_ticker(df: pd.DataFrame, calculator):
+        ticker_col = next(
+            (column for column in df.columns if column.lower() == 'ticker'),
+            None,
+        )
+        if ticker_col is None or df[ticker_col].nunique() <= 1:
+            return None
+        results = [
+            calculator(group)
+            for _, group in df.groupby(ticker_col, sort=False)
+        ]
+        return pd.concat(results).reindex(df.index)
  
     @staticmethod
     def atr(df: pd.DataFrame, period: int = 14, col: str = 'atr') -> pd.DataFrame:
@@ -26,6 +39,12 @@ class Indicators:
         Returns:
             df with '{col}' column appended
         """
+        per_ticker = Indicators._apply_by_ticker(
+            df, lambda group: Indicators.atr(group, period, col)
+        )
+        if per_ticker is not None:
+            return per_ticker
+
         df = df.copy()
         high  = df['High']
         low   = df['Low']
@@ -66,6 +85,15 @@ class Indicators:
         Returns:
             df with 'adx', 'di_plus', 'di_minus' columns appended
         """
+        per_ticker = Indicators._apply_by_ticker(
+            df,
+            lambda group: Indicators.adx(
+                group, period, col_adx, col_di_plus, col_di_minus
+            ),
+        )
+        if per_ticker is not None:
+            return per_ticker
+
         df = df.copy()
         high  = df['High']
         low   = df['Low']

@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
-from features.engineering import GeneralizedFeatureEngineer
+from training.config import MODEL_NAME, MODELS_DIR
+from training.features.engineering import GeneralizedFeatureEngineer
 from training.model_training import GeneralizedMLTrainer
 
 class StockPredictor:
@@ -8,7 +9,7 @@ class StockPredictor:
     Single stock predictor using trained generalized model
     """
     
-    def __init__(self, model_name='generalized_momentum', models_dir='models'):
+    def __init__(self, model_name=MODEL_NAME, models_dir=MODELS_DIR):
         """
         Args:
             model_name: Name of trained model
@@ -62,9 +63,7 @@ class StockPredictor:
         
         # Expected return (if available from historical data)
         # This would be from a separate calibration
-        expected_returns = self._estimate_expected_return(
-            predictions, confidence, probabilities
-        )
+        expected_returns = self._estimate_expected_return(predictions, confidence)
         
         results = {
             'predictions': predictions,
@@ -125,7 +124,7 @@ class StockPredictor:
         else:
             return 'HOLD'
     
-    def _estimate_expected_return(self, predictions, confidence, probabilities):
+    def _estimate_expected_return(self, predictions, confidence):
         """
         Estimate expected return based on prediction and confidence
         This is approximate - in production you'd calibrate this properly
@@ -220,10 +219,10 @@ def _signal_to_action(signal, strength):
 
 
 if __name__ == "__main__":
-    from data.pipeline import MultiStockDataPipeline
+    from training.data.pipeline import MultiStockDataPipeline
     
     # Load predictor
-    predictor = StockPredictor('generalized_momentum')
+    predictor = StockPredictor(MODEL_NAME)
     
     # Get model info
     info = predictor.get_model_info()

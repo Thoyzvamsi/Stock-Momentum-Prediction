@@ -1,7 +1,8 @@
 import pandas as pd
 import numpy as np
 import warnings
-from engine.indicators import Indicators
+from training.engine.indicators import Indicators
+from training.config import FORWARD_BARS, TARGET_THRESHOLD
 warnings.filterwarnings('ignore')
 
 class GeneralizedFeatureEngineer:
@@ -23,6 +24,18 @@ class GeneralizedFeatureEngineer:
     
     def create_all_features(self):
         """Build all features"""
+        ticker_col = next(
+            (column for column in self.df.columns if column.lower() == 'ticker'),
+            None,
+        )
+        if ticker_col is not None and self.df[ticker_col].nunique() > 1:
+            ticker_features = [
+                GeneralizedFeatureEngineer(group).create_all_features()
+                for _, group in self.df.groupby(ticker_col, sort=False)
+            ]
+            self.features = pd.concat(ticker_features).reindex(self.df.index)
+            return self.features
+
         print("Creating generalized features...")
 
         # Stock-specific features (TIER 1)
@@ -56,7 +69,7 @@ class GeneralizedFeatureEngineer:
         self.features['adx'] = df_ind['adx'].values
             
         self._validate()
-        print(f"✓ Created {self.features.shape[1]} features")
+        print(f"Created {self.features.shape[1]} features")
         return self.features
 
     # ========================================================================
@@ -275,18 +288,13 @@ class GeneralizedFeatureEngineer:
     
     def _validate(self):
         """Validate features; fill edge-case NaNs rather than crashing."""
-        initial_nan = self.features.isna().sum().sum()
+        all_nan_columns = self.features.columns[self.features.isna().all()].tolist()
+        if all_nan_columns:
+            raise ValueError(f"Features contain all-NaN columns: {all_nan_columns}")
 
-        if initial_nan > 0:
-            # Forward-fill then backward-fill to handle boundary NaNs from rolling
-            self.features = self.features.ffill().bfill()
-            remaining_nan = self.features.isna().sum().sum()
-            if remaining_nan > 0:
-                # Last resort: fill with column median
-                self.features = self.features.fillna(self.features.median())
-                print(f"⚠ Filled {initial_nan} NaNs (forward-fill + median fallback)")
-            else:
-                print(f"⚠ Forward-filled {initial_nan} boundary NaNs")
+        missing_values = int(self.features.isna().sum().sum())
+        if missing_values:
+            print(f"Warning: leaving {missing_values} undefined feature values as NaN")
 
         # Check variance
         zero_var_cols = []
@@ -298,42 +306,55 @@ class GeneralizedFeatureEngineer:
                 extreme_cols.append(col)
 
         if zero_var_cols:
-            print(f"⚠ Zero-variance columns: {zero_var_cols}")
+            print(f"Warning: zero-variance columns: {zero_var_cols}")
         if extreme_cols:
             # Clip rather than raise
             for col in extreme_cols:
                 self.features[col] = self.features[col].clip(-1e6, 1e6)
-            print(f"⚠ Clipped extreme values in: {extreme_cols}")
+            print(f"Warning: clipped extreme values in: {extreme_cols}")
 
-        print(f"✓ Feature validation passed")
+        print("Feature validation passed")
 
 
 class GeneralizedTargetEngineer:
     """Create targets for multi-stock model"""
     @staticmethod
-    def create_forward_return_target(df, forward_bars=6, threshold=0.005):
+    def create_forward_return_target(
+        df, forward_bars=FORWARD_BARS, threshold=TARGET_THRESHOLD
+    ):
         """
         Create 3-class target for generalized model.
         Accounts for different price scales across stocks by using % returns.
         """
         # Normalise column names defensively
         close_col = next(c for c in df.columns if c.lower() == 'close')
-        future_close = df[close_col].shift(-forward_bars)
+        ticker_col = next(
+            (column for column in df.columns if column.lower() == 'ticker'),
+            None,
+        )
+        if ticker_col is None:
+            future_close = df[close_col].shift(-forward_bars)
+        else:
+            future_close = df.groupby(ticker_col, sort=False)[close_col].shift(
+                -forward_bars
+            )
         forward_return = (future_close / df[close_col]) - 1
         
         target = np.where(
             forward_return > threshold, 1,
             np.where(forward_return < -threshold, -1, 0)
         )
+        target = pd.Series(target, index=df.index, name='target').astype(float)
+        target[future_close.isna()] = np.nan
         
-        return pd.Series(target, index=df.index, name='target')
+        return target
 
 
 if __name__ == "__main__":
-    from data.pipeline import MultiStockDataPipeline
+    from training.data.pipeline import MultiStockDataPipeline
     
     pipeline = MultiStockDataPipeline()
-    df = pipeline.load_training_data()
+    df = pipeline.load_combined_data("raw_data.csv")
     
     if df is not None:
         fe = GeneralizedFeatureEngineer(df)

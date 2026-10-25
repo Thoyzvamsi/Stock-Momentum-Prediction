@@ -2,7 +2,7 @@
 
 > A generalized multi-stock momentum prediction system — end-to-end ML pipeline with live signals, backtesting, fundamental scoring, and AI news sentiment.
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://python.org)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.35%2B-red)](https://streamlit.io)
 [![LightGBM](https://img.shields.io/badge/LightGBM-4.3%2B-green)](https://lightgbm.readthedocs.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
@@ -22,34 +22,29 @@ Key design choice: one model generalizes across stocks rather than one model per
 ```
 Stock-Momentum-Prediction/
 │
-├── data/
-│   ├── pipeline.py          # MultiStockDataPipeline — live fetch (yfinance) + validation
-│   └── raw_data.csv         # Combined OHLCV training data [Open, High, Low, Close, Volume, Ticker]
+├── training/                # Python pipeline and pinned environment
+│   ├── config.py            # Shared data, model, and artifact paths
+│   ├── data/                # Price pipeline and combined OHLCV training data
+│   ├── features/            # Feature and target engineering
+│   ├── engine/              # Indicators and cost-aware backtester
+│   ├── fundamentals/        # Fundamental scoring
+│   ├── models/              # Saved model artifacts
+│   ├── predictor/           # Live inference
+│   ├── model_training.py    # LightGBM training, evaluation, save/load
+│   ├── run_train.py         # Training entry point
+│   ├── requirements.txt     # Exact direct dependency pins
+│   └── .venv/               # Local virtual environment (not committed)
 │
-├── features/
-│   └── engineering.py       # GeneralizedFeatureEngineer (19 features) + TargetEngineer
-│
-├── training/
-│   └── model_training.py    # GeneralizedMLTrainer — walk-forward CV, LightGBM, save/load
-│
-├── engine/
-│   └── backtest.py          # CostAwareBacktester — commission + slippage, per-ticker stats
-│
-├── predictor/
-│   └── stock_predictor.py   # StockPredictor + SignalGenerator — live inference
-│
-├── fundamentals/
-│   └── scoring.py           # Fundamentals — forward P/E, PEG, ROE, D/E, revenue growth
-│
-├── models/                  # Saved artifacts (pkl + json) after training
-│
-├── .streamlit/
-│   └── config.toml          # Dark theme config
-│
-├── dashboard.py             # Streamlit app — main entry point
-├── multi_stock_main.py      # Training pipeline entry point
-└── requirements.txt
+├── tests/                   # Focused pipeline and sentiment tests
+├── dashboard.py             # Streamlit app
+├── ticker_utils.py           # Defaults bare ticker symbols to NSE (.NS)
+├── groq_sentiment.py         # Groq model selection, JSON validation, and errors
+├── news_utils.py             # Bounded timeout retry for Google News RSS
+└── .streamlit/config.toml   # Dark theme config
 ```
+
+In the sidebar, enter an NSE ticker as `HDFCBANK` or `RELIANCE`; `.NS` is added
+automatically. Explicit exchange suffixes such as `.BO` are kept as entered.
 
 ---
 
@@ -59,14 +54,14 @@ Stock-Momentum-Prediction/
 raw_data.csv (multi-stock OHLCV)
         │
         ▼
-GeneralizedFeatureEngineer          ← 19 scale-invariant features (z-scored per stock)
+GeneralizedFeatureEngineer          ← 22 scale-invariant features, calculated per ticker
         │
         ▼
 GeneralizedTargetEngineer           ← 3-class target: BUY(+1) / NEUTRAL(0) / SELL(-1)
         │                              forward_return > threshold → 1, < -threshold → -1
         ▼
 GeneralizedMLTrainer
-  ├── walk_forward_validation()     ← TimeSeriesSplit (5 folds) to detect lookahead bias
+  ├── walk_forward_validation()     ← Date-based folds with a forward-horizon embargo
   ├── train_final_model()           ← LightGBM, class_weight='balanced'
   └── evaluate() + save_model()
         │
@@ -74,7 +69,7 @@ GeneralizedMLTrainer
 CostAwareBacktester                 ← commission=0.1%, slippage=0.2%, hold_bars=15
         │
         ▼
-models/generalized_momentum_*.pkl  ← ready for live inference
+training/models/generalized_momentum_*.pkl  ← ready for live inference
         │
         ▼
 dashboard.py (Streamlit)
@@ -161,60 +156,89 @@ Metrics reported: Win Rate, Total Return, Annual Return, Sharpe Ratio, Max Drawd
 
 ## Setup
 
-### 1. Clone & install
+### 1. Clone and set up Python
 
-```bash
+```powershell
 git clone https://github.com/Thoyzvamsi/stock-momentum-prediction.git
-cd stock-momentum-prediction
-pip install -r requirements.txt
+Set-Location stock-momentum-prediction
+py -3.11 -m venv training\.venv
+training\.venv\Scripts\python.exe -m pip install --upgrade pip
+training\.venv\Scripts\python.exe -m pip install -r training\requirements.txt
 ```
 
-### 2. Add training data
+The checked-in dependency pins were verified with Python 3.11. Use the virtual
+environment's Python for commands below.
+VS Code is configured to use `training\.venv\Scripts\python.exe` for this workspace.
+The root `requirements.txt` is used by Streamlit Community Cloud; the training
+requirements also include pytest for local validation.
 
-Place a CSV file named `raw_data.csv` in the `data/` folder. Required columns:
+### 2. Training data
+
+The combined training CSV is `training/data/raw_data.csv`. Required columns:
 
 ```
 Open, High, Low, Close, Volume, Ticker
 ```
 
-The file should contain data for multiple tickers (e.g. TCS.NS, INFY.NS, RELIANCE.NS). More tickers = better generalization.
+The file should contain data for multiple tickers (e.g. TCS.NS, INFY.NS, RELIANCE.NS) and a `Datetime` column. More tickers = better generalization.
 
 ### 3. Set API key
 
 For **local development**, create `.env`:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Then edit `.env` locally and replace the empty key:
+
 ```
 GROQ_API_KEY=your_key_here
+GROQ_MODEL=llama-3.3-70b-versatile
 ```
+`GROQ_MODEL` is optional. The app checks Groq's available models and uses this
+model first, then tries its configured fallbacks. If Groq rejects the key,
+replace it; sentiment will report as unavailable while the rest of the app
+continues to work. Start from `.env.example`.
 
 For **Streamlit Cloud**, add to Settings → Secrets:
 ```toml
 GROQ_API_KEY = "your_key_here"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 ```
 
 Get a free key at [console.groq.com](https://console.groq.com).
 
 ### 4. Train the model
 
-```bash
-python multi_stock_main.py
+First run the bounded smoke test. It uses synthetic data (3 tickers, 125 sessions,
+30 training rounds) and verifies feature/label boundaries and model save/load.
+
+```powershell
+training\.venv\Scripts\python.exe -m training.run_smoke
+```
+
+Only after it passes, start the full training run:
+
+```powershell
+training\.venv\Scripts\python.exe -m training.run_train
 ```
 
 Optional flags:
-```bash
-python multi_stock_main.py \
-  --forward-bars 8 \
-  --threshold 0.005 \
-  --test-size 0.2 \
-  --commission 0.001 \
-  --slippage 0.002 \
-  --min-confidence 0.65 \
-  --hold-bars 15
+```powershell
+training\.venv\Scripts\python.exe -m training.run_train --forward-bars 8 --threshold 0.005 --test-size 0.2 --commission 0.001 --slippage 0.002 --min-confidence 0.65 --hold-bars 15
 ```
 
 ### 5. Launch dashboard
 
-```bash
-streamlit run dashboard.py
+```powershell
+training\.venv\Scripts\streamlit.exe run dashboard.py
+```
+
+Run the focused tests:
+
+```powershell
+training\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
 ---
@@ -248,21 +272,53 @@ The Streamlit dashboard has four sections:
 Deployed on Streamlit Community Cloud:  
 **[stock-momentum-prediction.streamlit.app](https://stock-momentum-prediction-psd5apu4lbgtwyxwo2obrk.streamlit.app/)**
 
-The `models/` directory (trained artifacts) must be committed to the repo for Streamlit Cloud to load the predictor. Model files are ~5MB and tracked in Git.
+To deploy or update the app on Streamlit Community Cloud:
+
+1. Push the repository to GitHub and confirm all three files in
+   `training/models/` (model, scaler, and config) are committed. The app does
+   not need the training CSV at runtime.
+2. Create or open the app in Streamlit Community Cloud using this repository,
+   select the deployment branch, and set the main file to `dashboard.py`.
+3. Select Python 3.11 in the app's advanced settings. Cloud installs the
+   dashboard dependencies from the root `requirements.txt`.
+4. Add `GROQ_API_KEY` under App settings → Secrets if AI news sentiment is
+   wanted. `GROQ_MODEL` is optional. Do not commit `.env` or Streamlit secrets.
+   The dashboard remains usable without a Groq key, but sentiment is disabled.
+5. Restart the app after changing secrets or replacing the committed model
+   artifacts.
+
+For local launch, use:
+
+```powershell
+training\.venv\Scripts\streamlit.exe run dashboard.py
+```
+
+Training runs are visible in the terminal and mirrored to
+`training/logs/<run-id>.log`. Each completed or failed run also writes a JSON
+report under `experiments/runs/` and adds a summary to `experiments/LOG.md`.
 
 ---
 
 ## Results
 
-*Fill this in after running `multi_stock_main.py` on your data.*
+Full training completed on 2026-10-25 using 145,046 rows from five tickers
+(2019-03-01 through 2023-10-12), with 72,294 directional training samples and
+22 features. The dataset is historical and ends in 2023; refresh it before
+using this model for current market analysis.
 
 | Metric | Value |
 |--------|-------|
-| Walk-forward accuracy | — |
-| Test accuracy | — |
-| Win rate (backtest) | — |
-| Sharpe ratio | — |
-| Max drawdown | — |
+| Walk-forward accuracy | 51.2% ± 1.7% |
+| Holdout accuracy / F1 | 52.8% / 52.8% |
+| Backtest win rate (169 trades) | 50.3% |
+| Backtest total return / Sharpe | 252.5% / 1.51 |
+| Backtest max drawdown | -2.2% |
+
+These metrics are exploratory, not a production-performance claim. The
+walk-forward and holdout scores are only modestly above chance, and the
+backtest still needs comparisons against always-HOLD, buy-and-hold, and an EMA
+crossover before its reported return should be trusted. This app is for
+research purposes only, not financial advice.
 
 ---
 
