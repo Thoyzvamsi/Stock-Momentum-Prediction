@@ -5,10 +5,9 @@ from training.engine.indicators import Indicators
 from training.config import FORWARD_BARS, TARGET_THRESHOLD
 warnings.filterwarnings('ignore')
 
-class GeneralizedFeatureEngineer:
+class StockFeatureEngineer:
     """
-    Enhanced feature engineering for multi-stock generalized model
-    Includes market context and stock-relative features
+    Build the per-stock features used by the live Analyzer model.
     """
     
     def __init__(self, df):
@@ -30,13 +29,13 @@ class GeneralizedFeatureEngineer:
         )
         if ticker_col is not None and self.df[ticker_col].nunique() > 1:
             ticker_features = [
-                GeneralizedFeatureEngineer(group).create_all_features()
+                StockFeatureEngineer(group).create_all_features()
                 for _, group in self.df.groupby(ticker_col, sort=False)
             ]
             self.features = pd.concat(ticker_features).reindex(self.df.index)
             return self.features
 
-        print("Creating generalized features...")
+        print("Creating stock features...")
 
         # Stock-specific features (TIER 1)
         self._volume_imbalance()
@@ -316,15 +315,14 @@ class GeneralizedFeatureEngineer:
         print("Feature validation passed")
 
 
-class GeneralizedTargetEngineer:
-    """Create targets for multi-stock model"""
+class StockTargetEngineer:
+    """Create forward-return labels for a single stock."""
     @staticmethod
     def create_forward_return_target(
         df, forward_bars=FORWARD_BARS, threshold=TARGET_THRESHOLD
     ):
         """
-        Create 3-class target for generalized model.
-        Accounts for different price scales across stocks by using % returns.
+        Create directional labels from percentage returns.
         """
         # Normalise column names defensively
         close_col = next(c for c in df.columns if c.lower() == 'close')
@@ -348,20 +346,3 @@ class GeneralizedTargetEngineer:
         target[future_close.isna()] = np.nan
         
         return target
-
-
-if __name__ == "__main__":
-    from training.data.pipeline import MultiStockDataPipeline
-    
-    pipeline = MultiStockDataPipeline()
-    df = pipeline.load_combined_data("raw_data.csv")
-    
-    if df is not None:
-        fe = GeneralizedFeatureEngineer(df)
-        features = fe.create_all_features()
-        
-        target = GeneralizedTargetEngineer.create_forward_return_target(df)
-        
-        print(f"\nFeatures shape: {features.shape}")
-        print(f"Target shape: {target.shape}")
-        print(f"Target distribution: {pd.Series(target).value_counts().to_dict()}")

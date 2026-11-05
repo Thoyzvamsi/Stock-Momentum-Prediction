@@ -15,10 +15,6 @@ training/.venv/
 training/logs/
 logs/
 
-# Data (raw CSVs can be large — keep processed only)
-data/raw_data.csv
-training/data/raw_data.csv
-
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
@@ -34,7 +30,7 @@ Thumbs.db
 !.vscode/settings.json
 .idea/
 
-# Streamlit local cache
-.streamlit/secrets.toml
+# Experiment records and research notes
+/experiments/
 
 AGENT.md

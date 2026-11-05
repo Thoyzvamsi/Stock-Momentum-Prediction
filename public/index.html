@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#07090e">
+    <meta name="description" content="Stock momentum prediction and market evidence.">
+    <title>Stock Momentum</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="/" aria-label="Stock Momentum home">
+          <span class="brand-mark" aria-hidden="true">S</span>
+          <span class="brand-copy">STOCK<span class="brand-light">MOMENTUM</span></span>
+        </a>
+        <div class="sidebar-section-label">WORKSPACE</div>
+        <nav class="side-nav" aria-label="Main navigation">
+          <a href="/" data-nav="home">
+            <span class="nav-icon" aria-hidden="true">▦</span><span>Home</span><span class="nav-arrow" aria-hidden="true">›</span>
+          </a>
+          <a href="/analyzer" data-nav="analyzer">
+            <span class="nav-icon" aria-hidden="true">⌕</span><span>Stock analyzer</span><span class="nav-arrow" aria-hidden="true">›</span>
+          </a>
+        </nav>
+        <div class="sidebar-section-label">RESEARCH</div>
+        <div class="sidebar-note">
+          <span class="sidebar-note-icon" aria-hidden="true">◌</span>
+          <span>Prediction signals are research context, not trade instructions.</span>
+        </div>
+        <div class="sidebar-bottom">
+          <div class="connection-indicator"><span></span><div><strong>Research mode</strong><small>No broker connected</small></div></div>
+          <p>For experiments only.<br>Not financial advice.</p>
+        </div>
+      </aside>
+
+      <button class="sidebar-backdrop" id="sidebar-backdrop" type="button" aria-label="Close navigation"></button>
+
+      <div class="main-shell">
+        <header class="topbar">
+          <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+            <span></span><span></span><span></span>
+          </button>
+          <form id="ticker-search" class="search-form" role="search">
+            <label class="sr-only" for="ticker-input">Search stock symbol</label>
+            <span class="search-icon" aria-hidden="true">⌕</span>
+            <input id="ticker-input" name="ticker" autocomplete="off" placeholder="Search stocks, e.g. HDFCBANK" maxlength="24">
+            <kbd>ENTER</kbd>
+            <button type="submit">Analyze</button>
+          </form>
+          <div class="topbar-actions">
+            <span class="research-pill"><i></i> RESEARCH</span>
+            <span class="topbar-divider"></span>
+            <span class="user-avatar" aria-hidden="true">SM</span>
+            <div class="user-label"><strong>Stock Momentum</strong><small>Research workspace</small></div>
+          </div>
+        </header>
+
+        <main id="app" aria-live="polite">
+          <section class="loading-state panel" id="loading-state">
+            <span class="spinner" aria-hidden="true"></span>
+            <p>Loading market data…</p>
+          </section>
+        </main>
+
+        <footer class="site-footer">
+          <span>For experiments only. Not financial advice.</span>
+          <span>Market data and estimates may be delayed or incomplete.</span>
+        </footer>
+      </div>
+    </div>
+  </body>
+</html>

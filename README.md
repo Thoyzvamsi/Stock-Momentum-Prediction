@@ -1,340 +1,192 @@
 # Stock Momentum Prediction
 
-> A generalized multi-stock momentum prediction system — end-to-end ML pipeline with live signals, backtesting, fundamental scoring, and AI news sentiment.
+Stock Momentum is a stock-research web app with a FastAPI backend and a
+JavaScript, HTML, and CSS frontend. It provides a Home workspace for market
+context and a Stock Analyzer that fits a model to the selected stock's own
+recent price history.
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://python.org)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.35%2B-red)](https://streamlit.io)
-[![LightGBM](https://img.shields.io/badge/LightGBM-4.3%2B-green)](https://lightgbm.readthedocs.io)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+> **For experiments only. Not financial advice.** Predictions and expected
+> returns are estimates, not trade instructions or guaranteed outcomes. They
+> are not independently validated performance claims. Market data may be
+> delayed, incomplete, or unavailable.
 
----
+## What the app includes
 
-## What It Does
+- **Home:** editable watchlist, symbol search/filter, latest prices and daily
+  changes, a default NIFTY 50 market chart, and chart selections for Brent
+  crude, S&P 500, and EURO STOXX 50.
+- **Stock Analyzer:** per-stock prediction and expected return, confidence,
+  15-minute price chart, and selectable 30-, 45-, or 60-day history.
+- **Supporting research:** trend indicators, FII/FPI and DII flows,
+  fundamentals, analyst information, peer comparisons, and quarterly results
+  when the data sources provide them.
+- **AI market read:** related headlines and a sentiment summary when a Groq
+  API key is configured.
 
-Trains a single LightGBM classifier on combined OHLCV data from multiple stocks, then deploys it as a live Streamlit dashboard that generates **BUY / SELL / HOLD** signals for any stock symbol in real time.
+The watchlist is stored in the current browser's local storage; it is not
+shared between browsers or devices. It supports up to 20 symbols and refreshes
+quotes about once a minute. It does not run stock predictions. The Analyzer
+trains a LightGBM model from the selected symbol's available 15-minute
+history, then caches it in application memory for up to six hours. Models are
+not persisted across server restarts.
 
-Key design choice: one model generalizes across stocks rather than one model per ticker. This forces the features to be scale-invariant and stock-relative — which makes the approach more robust and more deployable.
+## How a prediction is produced
 
----
+When you analyze a symbol, the server fetches its adjusted 15-minute OHLCV bars
+for the selected 30-, 45-, or 60-day window. It builds features from that
+symbol's own history; the model does not use other stocks' training rows. The
+watchlist does not train models or generate predictions.
 
-## Architecture
+The flow is:
 
-```
-Stock-Momentum-Prediction/
-│
-├── training/                # Python pipeline and pinned environment
-│   ├── config.py            # Shared data, model, and artifact paths
-│   ├── data/                # Price pipeline and combined OHLCV training data
-│   ├── features/            # Feature and target engineering
-│   ├── engine/              # Indicators and cost-aware backtester
-│   ├── fundamentals/        # Fundamental scoring
-│   ├── models/              # Saved model artifacts
-│   ├── predictor/           # Live inference
-│   ├── model_training.py    # LightGBM training, evaluation, save/load
-│   ├── run_train.py         # Training entry point
-│   ├── requirements.txt     # Exact direct dependency pins
-│   └── .venv/               # Local virtual environment (not committed)
-│
-├── tests/                   # Focused pipeline and sentiment tests
-├── dashboard.py             # Streamlit app
-├── ticker_utils.py           # Defaults bare ticker symbols to NSE (.NS)
-├── groq_sentiment.py         # Groq model selection, JSON validation, and errors
-├── news_utils.py             # Bounded timeout retry for Google News RSS
-└── .streamlit/config.toml   # Dark theme config
-```
+1. **Build features from each bar.** The feature set describes recent price,
+   volume, candle shape, volatility, momentum, and time-of-day context. For
+   example, it includes volume imbalance and surge, distance from VWAP,
+   consecutive up/down bars, higher-high/lower-low structure, price and volume
+   percentiles, money flow, ATR, and ADX. Features are calculated from current
+   and prior bars, not future prices.
+2. **Create historical labels.** For every bar with enough future data, the
+   app calculates
+   `return = (close 8 bars later / current close) - 1`.
+   A return above **+0.5%** is labeled upward (`+1`); below **-0.5%** is
+   labeled downward (`-1`); returns between those thresholds are neutral
+   (`0`). The neutral rows are excluded from model fitting, so the model learns
+   to distinguish upward from downward moves rather than predict the neutral
+   class. Eight 15-minute trading bars are about two hours of market trading,
+   but overnight closures, weekends, and missing bars can make the elapsed
+   clock time longer.
+3. **Fit a stock-specific classifier.** The app drops rows with incomplete
+   features or labels, then requires at least 250 usable directional examples
+   and at least 10 examples of each direction. A `StandardScaler` is fitted on
+   those rows, followed by a LightGBM classifier. The current settings are
+   150 boosting iterations, maximum depth 5, learning rate 0.01, 31 leaves,
+   and balanced class weights.
+4. **Score the latest bar.** The newest complete feature row is transformed
+   with the fitted scaler. LightGBM returns probabilities for the upward and
+   downward classes. The class with the larger probability is the predicted
+   direction, and the larger probability is reported as confidence. A
+   probability below **65%** changes the displayed action to `HOLD`; at 65%
+   or above the action is `BUY` or `SELL` according to the more likely class.
+   Strength is `STRONG` at 70% or higher, `MODERATE` from 65% to below 70%,
+   and `WEAK` below 65%.
+5. **Estimate expected return.** During fitting, the app calculates the
+   historical mean forward return for each direction after clipping extreme
+   returns to the 1st and 99th percentiles. It weights those two averages by
+   the latest upward/downward probabilities and adds them. The result is
+   displayed as a percentage. It is an estimate based on this stock's recent
+   labeled history—not a promised return or a separately trained return
+   forecast. It is possible to see `HOLD` with a non-zero expected return,
+   because the action uses the 65% confidence threshold while expected return
+   uses both class probabilities.
 
-In the sidebar, enter an NSE ticker as `HDFCBANK` or `RELIANCE`; `.NS` is added
-automatically. Explicit exchange suffixes such as `.BO` are kept as entered.
+The first request for a symbol and history window fits the model; subsequent
+requests reuse that model for up to six hours. The cache is in memory and is
+lost on restart. A different symbol or window gets its own model. Market
+trend, FII/DII flows, fundamentals, peers, quarterly results, and the optional
+AI news read are supporting context shown alongside the prediction; they are
+not inputs to this classifier and do not override its output.
 
----
+### Important model limitations
 
-## Pipeline Flow
+The classifier is fitted on all eligible rows in the selected recent window.
+The app does **not** currently hold out a validation set, run walk-forward
+validation, tune hyperparameters per stock, calibrate the probabilities, or
+backtest the live prediction. As a result, confidence is the model's raw
+probability estimate, not a proven likelihood of being correct. The expected
+return is derived from the same training window. Neither metric should be
+treated as evidence of future profitability. This model is for exploration,
+not financial advice or automated trading.
 
-```
-raw_data.csv (multi-stock OHLCV)
-        │
-        ▼
-GeneralizedFeatureEngineer          ← 22 scale-invariant features, calculated per ticker
-        │
-        ▼
-GeneralizedTargetEngineer           ← 3-class target: BUY(+1) / NEUTRAL(0) / SELL(-1)
-        │                              forward_return > threshold → 1, < -threshold → -1
-        ▼
-GeneralizedMLTrainer
-  ├── walk_forward_validation()     ← Date-based folds with a forward-horizon embargo
-  ├── train_final_model()           ← LightGBM, class_weight='balanced'
-  └── evaluate() + save_model()
-        │
-        ▼
-CostAwareBacktester                 ← commission=0.1%, slippage=0.2%, hold_bars=15
-        │
-        ▼
-training/models/generalized_momentum_*.pkl  ← ready for live inference
-        │
-        ▼
-dashboard.py (Streamlit)
-  ├── StockPredictor.predict_latest()   ← BUY/SELL/HOLD + confidence
-  ├── Fundamentals.compute_score()      ← 0-100 investment score
-  └── fetch_and_analyze_news()          ← Groq LLaMA-3.3 sentiment analysis
-```
+## Data and limitations
 
----
+The app retrieves price, company, analyst, peer, and quarterly data through
+Yahoo Finance's `yfinance` library. FII/FPI and DII flows come from NSE's
+public market-flow feed when available; the feed may provide only the latest
+session. News headlines are fetched from Google News RSS. AI summarization
+uses Groq and is optional.
 
-## Feature Engineering
+These third-party sources can be delayed, rate-limited, or unavailable. Some
+stocks may not have enough recent history or both directional outcomes to fit
+a usable model. In that case, analysis may be unavailable. The application
+does not connect to a broker, execute trades, or guarantee prediction
+accuracy.
 
-All features are designed to be **scale-invariant** — they work on a ₹50 stock and a ₹5000 stock equally because they use ratios, percentiles, and per-stock z-scores instead of raw prices or volumes.
+## Run locally
 
-| Tier | Feature | What It Captures |
-|------|---------|-----------------|
-| 1 | `vol_imbalance` | Buy vs sell pressure over 20 bars |
-| 1 | `candle_size_pct` | Is this candle abnormally large? (rolling percentile) |
-| 1 | `volume_surge` | Volume vs its own 20-bar average |
-| 1 | `tick_momentum` | Net directional pressure over 10 bars |
-| 1 | `vwap_dist` | Price distance from VWAP (cumulative per session) |
-| 2 | `body_wick_ratio` | Candle conviction (body / total range) |
-| 2 | `vol_percentile` | Is volatility high or low? (rolling z-score) |
-| 2 | `consecutive_bars` | How many bars in the same direction |
-| 2 | `price_structure` | Higher-highs vs lower-lows count |
-| 2 | `acceleration` | Change in 5-bar momentum vs 10-bar momentum |
-| 3 | `is_first_hour` | Market open effect (09:15–10:15 IST) |
-| 3 | `is_lunch` | Lunch lull effect (12:00–14:00) |
-| 3 | `is_last_hour` | Power hour effect (15:00+) |
-| 3 | `range_position` | Where close sits in the high-low range |
-| 3 | `gap_size` | Opening gap from previous close |
-| 3 | `mfi` | Money Flow Index (volume-weighted RSI) |
-| Market | `relative_volatility` | Vol z-scored within each stock's own history |
-| Market | `momentum_rank` | 20-bar return percentile within stock's history |
-| Market | `volume_rank` | Normalized volume percentile within stock's history |
-
-**Why per-stock z-scoring instead of cross-sectional ranking:** Cross-sectional ranking requires all stocks to be sampled at the same timestamps. Multi-stock intraday data is uneven (NSE vs NYSE trading hours, halts, etc.) — per-stock rolling z-scores sidestep this entirely while still capturing relative context.
-
----
-
-## Target Variable
-
-3-class classification on forward returns:
-
-```
-forward_return = (close[t + forward_bars] / close[t]) - 1
-
-  BUY  (+1):  forward_return >  threshold  (default 0.5%)
-  SELL (-1):  forward_return < -threshold
-  NEUTRAL (0): within ±threshold (dropped during training)
-```
-
-Neutral samples are removed before training. This keeps the model focused on high-conviction setups rather than noise.
-
----
-
-## Model
-
-**LightGBM classifier** with:
-- `n_estimators=500`, `max_depth=5`, `learning_rate=0.01`, `num_leaves=31`
-- `class_weight='balanced'` — handles class imbalance
-- `subsample=0.8`, `colsample_bytree=0.7` — regularization
-- Walk-forward validation (5 folds) to verify no lookahead bias before training the final model
-- StandardScaler normalization before fit
-
----
-
-## Backtesting
-
-`CostAwareBacktester` simulates realistic execution costs:
-
-| Parameter | Default | Notes |
-|-----------|---------|-------|
-| Commission | 0.1% | One-way (charged on entry and exit) |
-| Slippage | 0.2% | One-way estimate |
-| Round-trip cost | 0.6% | Total drag per trade |
-| Hold period | 15 bars | Fixed exit after N bars |
-| Min confidence | 65% | Below this → no trade |
-| Position size | 10 shares | Fixed shares per trade |
-
-Metrics reported: Win Rate, Total Return, Annual Return, Sharpe Ratio, Max Drawdown, Profit Factor, Expected Value, per-ticker breakdown.
-
----
-
-## Setup
-
-### 1. Clone and set up Python
+Requires Python 3.11 or newer. From the repository root, create a virtual
+environment and install the app dependencies:
 
 ```powershell
-git clone https://github.com/Thoyzvamsi/stock-momentum-prediction.git
-Set-Location stock-momentum-prediction
-py -3.11 -m venv training\.venv
-training\.venv\Scripts\python.exe -m pip install --upgrade pip
-training\.venv\Scripts\python.exe -m pip install -r training\requirements.txt
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 ```
 
-The checked-in dependency pins were verified with Python 3.11. Use the virtual
-environment's Python for commands below.
-VS Code is configured to use `training\.venv\Scripts\python.exe` for this workspace.
-The root `requirements.txt` is used by Streamlit Community Cloud; the training
-requirements also include pytest for local validation.
-
-### 2. Training data
-
-The combined training CSV is `training/data/raw_data.csv`. Required columns:
-
-```
-Open, High, Low, Close, Volume, Ticker
-```
-
-The file should contain data for multiple tickers (e.g. TCS.NS, INFY.NS, RELIANCE.NS) and a `Datetime` column. More tickers = better generalization.
-
-### 3. Set API key
-
-For **local development**, create `.env`:
+Start the app:
 
 ```powershell
-Copy-Item .env.example .env
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Then edit `.env` locally and replace the empty key:
+Open <http://127.0.0.1:8000>. FastAPI's interactive API documentation is at
+<http://127.0.0.1:8000/docs>.
 
-```
+### Optional Groq configuration
+
+AI news analysis requires a Groq API key. Set `GROQ_API_KEY` in the server
+environment, or create a root-level `.env` file:
+
+```dotenv
 GROQ_API_KEY=your_key_here
 GROQ_MODEL=llama-3.3-70b-versatile
 ```
-`GROQ_MODEL` is optional. The app checks Groq's available models and uses this
-model first, then tries its configured fallbacks. If Groq rejects the key,
-replace it; sentiment will report as unavailable while the rest of the app
-continues to work. Start from `.env.example`.
 
-For **Streamlit Cloud**, add to Settings → Secrets:
-```toml
-GROQ_API_KEY = "your_key_here"
-GROQ_MODEL = "llama-3.3-70b-versatile"
-```
+`GROQ_MODEL` is optional. The app checks available models and uses its
+configured fallback choices. Without a valid key or available model, the rest
+of the application remains usable and the AI read is reported as unavailable.
+Keep `.env` private; never commit the key or expose it in the browser.
 
-Get a free key at [console.groq.com](https://console.groq.com).
+## API
 
-### 4. Train the model
+- `GET /api/health` — application health check.
+- `GET /api/market` — market overview instruments and chart history.
+- `GET /api/index` — default watchlist quotes and FII/DII flows.
+- `GET /api/index?tickers=HDFCBANK,ITC,TCS` — quotes for the supplied symbols
+  (maximum 20).
+- `GET /api/stock/{ticker}?period=60d` — stock analysis. Supported periods
+  are `30d`, `45d`, and `60d`.
 
-First run the bounded smoke test. It uses synthetic data (3 tickers, 125 sessions,
-30 training rounds) and verifies feature/label boundaries and model save/load.
+Common symbols can be entered without an exchange suffix; the server
+normalizes them for data lookup while the interface displays the clean symbol.
 
-```powershell
-training\.venv\Scripts\python.exe -m training.run_smoke
-```
+## Tests
 
-Only after it passes, start the full training run:
-
-```powershell
-training\.venv\Scripts\python.exe -m training.run_train
-```
-
-Optional flags:
-```powershell
-training\.venv\Scripts\python.exe -m training.run_train --forward-bars 8 --threshold 0.005 --test-size 0.2 --commission 0.001 --slippage 0.002 --min-confidence 0.65 --hold-bars 15
-```
-
-### 5. Launch dashboard
+The development requirements include pytest and Uvicorn. Run the test suite:
 
 ```powershell
-training\.venv\Scripts\streamlit.exe run dashboard.py
+.\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-Run the focused tests:
+## Project layout
 
-```powershell
-training\.venv\Scripts\python.exe -m pytest tests -q
+```text
+api/                         FastAPI routes, data services, and response schemas
+training/config.py           Runtime model and market-data settings
+training/engine/             Technical indicators
+training/features/           Stock-specific feature and target engineering
+training/fundamentals/       Fundamental scoring
+public/                      CDN-served HTML, CSS, and JavaScript
+tests/                       API, feature, ticker, and Groq helper tests
+main.py                      ASGI entrypoint (main:app)
+requirements.txt             Runtime dependencies
+vercel.json                  SPA route rewrites
 ```
 
----
+## Deploy on Vercel
 
-## Dashboard
-
-The Streamlit dashboard has four sections:
-
-**Signal Panel** — Latest BUY/SELL/HOLD signal with confidence score, expected return, and action label (ENTER_LONG, CONSIDER_LONG, etc.)
-
-**Candlestick Chart** — 15-minute OHLCV candles for the last 2 trading days with volume overlay. Market hours gaps removed from the x-axis (supports both NSE and NYSE sessions).
-
-**Fundamental Analysis** — Investment score (0–100) computed from Forward P/E, PEG Ratio, Return on Equity, Debt/Equity, and Revenue Growth. Analyst consensus targets when available.
-
-**AI News Sentiment** — Fetches recent headlines via Google News RSS, analyzes with LLaMA-3.3-70b (Groq) to produce: overall sentiment, sentiment score (-100 to +100), bullish/bearish factors, short-term outlook, and risk factors.
-
----
-
-## Known Limitations
-
-- **Backtest realism**: The backtester uses fixed hold periods and doesn't model partial fills, market impact, or overnight gaps.
-- **VWAP calculation**: Currently cumulative (session-level), not reset per trading day. This means VWAP drifts on multi-day data.
-- **No live order execution**: This is a research/signal tool. It does not connect to any broker API.
-- **15m timeframe only**: The dashboard fetches 15-minute bars. The model was trained on 15-minute data. Don't apply it to daily bars without retraining.
-- **NSE bias**: Default ticker is TCS.NS. The model generalizes across stocks but was developed and tested primarily on Indian equities.
-
----
-
-## Deployment
-
-Deployed on Streamlit Community Cloud:  
-**[stock-momentum-prediction.streamlit.app](https://stock-momentum-prediction-psd5apu4lbgtwyxwo2obrk.streamlit.app/)**
-
-To deploy or update the app on Streamlit Community Cloud:
-
-1. Push the repository to GitHub and confirm all three files in
-   `training/models/` (model, scaler, and config) are committed. The app does
-   not need the training CSV at runtime.
-2. Create or open the app in Streamlit Community Cloud using this repository,
-   select the deployment branch, and set the main file to `dashboard.py`.
-3. Select Python 3.11 in the app's advanced settings. Cloud installs the
-   dashboard dependencies from the root `requirements.txt`.
-4. Add `GROQ_API_KEY` under App settings → Secrets if AI news sentiment is
-   wanted. `GROQ_MODEL` is optional. Do not commit `.env` or Streamlit secrets.
-   The dashboard remains usable without a Groq key, but sentiment is disabled.
-5. Restart the app after changing secrets or replacing the committed model
-   artifacts.
-
-For local launch, use:
-
-```powershell
-training\.venv\Scripts\streamlit.exe run dashboard.py
-```
-
-Training runs are visible in the terminal and mirrored to
-`training/logs/<run-id>.log`. Each completed or failed run also writes a JSON
-report under `experiments/runs/` and adds a summary to `experiments/LOG.md`.
-
----
-
-## Results
-
-Full training completed on 2026-10-25 using 145,046 rows from five tickers
-(2019-03-01 through 2023-10-12), with 72,294 directional training samples and
-22 features. The dataset is historical and ends in 2023; refresh it before
-using this model for current market analysis.
-
-| Metric | Value |
-|--------|-------|
-| Walk-forward accuracy | 51.2% ± 1.7% |
-| Holdout accuracy / F1 | 52.8% / 52.8% |
-| Backtest win rate (169 trades) | 50.3% |
-| Backtest total return / Sharpe | 252.5% / 1.51 |
-| Backtest max drawdown | -2.2% |
-
-These metrics are exploratory, not a production-performance claim. The
-walk-forward and holdout scores are only modestly above chance, and the
-backtest still needs comparisons against always-HOLD, buy-and-hold, and an EMA
-crossover before its reported return should be trusted. This app is for
-research purposes only, not financial advice.
-
----
-
-## Tech Stack
-
-| Layer | Library |
-|-------|---------|
-| Data | yfinance, pandas, numpy |
-| ML | LightGBM, scikit-learn |
-| Backtesting | Custom (`CostAwareBacktester`) |
-| Dashboard | Streamlit, Plotly |
-| Sentiment | Groq API (LLaMA-3.3-70b) |
-| Fundamentals | yfinance `.info` |
-
----
-
-## License
-
-MIT
+Import this repository into Vercel. It detects the FastAPI app exported as
+`app` from the root `main.py`, serves files from `public/` through its CDN, and
+uses the rewrites in `vercel.json` for analyzer page URLs. Set `GROQ_API_KEY`
+as a Vercel environment variable if AI news analysis is needed; `GROQ_MODEL`
+is optional. The model cache is in memory, so a cold function start can trigger
+training on the first analysis request for each stock and history window.
