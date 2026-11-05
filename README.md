@@ -189,4 +189,6 @@ Import this repository into Vercel. It detects the FastAPI app exported as
 uses the rewrites in `vercel.json` for analyzer page URLs. Set `GROQ_API_KEY`
 as a Vercel environment variable if AI news analysis is needed; `GROQ_MODEL`
 is optional. The model cache is in memory, so a cold function start can trigger
-training on the first analysis request for each stock and history window.
+training on the first analysis request for each stock and history window. The
+Vercel build hook downloads a pinned, SHA-256-verified OpenMP runtime required
+by LightGBM and bundles it with the function; no Docker image is used.

@@ -13,6 +13,7 @@ from urllib.parse import quote, urlparse
 import xml.etree.ElementTree as ET
 
 import httpx
+import native_runtime
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
