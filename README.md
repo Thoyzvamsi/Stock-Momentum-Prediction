@@ -185,10 +185,12 @@ vercel.json                  SPA route rewrites
 ## Deploy on Vercel
 
 Import this repository into Vercel. It detects the FastAPI app exported as
-`app` from the root `main.py`, serves files from `public/` through its CDN, and
-uses the rewrites in `vercel.json` for analyzer page URLs. Set `GROQ_API_KEY`
-as a Vercel environment variable if AI news analysis is needed; `GROQ_MODEL`
-is optional. The model cache is in memory, so a cold function start can trigger
-training on the first analysis request for each stock and history window. The
-Vercel build hook downloads a pinned, SHA-256-verified OpenMP runtime required
-by LightGBM and bundles it with the function; no Docker image is used.
+`app` from the root `main.py` (`main:app`), installs runtime dependencies from
+`pyproject.toml` and `requirements.txt`, serves files from `public/` through
+its CDN, and uses the rewrites in `vercel.json` for analyzer page URLs. Set
+`GROQ_API_KEY` as a Vercel environment variable if AI news analysis is needed;
+`GROQ_MODEL` is optional. The model cache is in memory, so a cold function
+start can trigger training on the first analysis request for each stock and
+history window. The Vercel build hook downloads a pinned, SHA-256-verified
+OpenMP runtime required by LightGBM and bundles it with the function; no Docker
+image is used.

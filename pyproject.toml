@@ -1,2 +1,33 @@
+[project]
+name = "stock-momentum-prediction"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas==3.0.3",
+    "numpy==2.4.6",
+    "scikit-learn==1.9.0",
+    "lightgbm==4.6.0",
+    "yfinance==1.4.1",
+    "groq==1.4.0",
+    "httpx==0.28.1",
+    "python-dotenv==1.2.2",
+    "fastapi==0.115.12",
+    "pydantic==2.14.1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["main", "groq_sentiment", "native_runtime", "news_utils", "ticker_utils"]
+
+[tool.setuptools.packages.find]
+include = ["api*", "training*"]
+exclude = ["tests*"]
+
+[tool.vercel]
+entrypoint = "main:app"
+
 [tool.vercel.scripts]
 build = "python build.py"
